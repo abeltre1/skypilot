@@ -1,0 +1,30 @@
+# Example ~/.sky/ssh_node_pools.yaml
+#
+# For HPC systems that are NOT Slurm (e.g. Flux) SkyPilot has no native
+# scheduler. Where the site permits, you can turn login/compute nodes into a
+# lightweight Kubernetes (K3s) cluster and use them as an SSH Node Pool:
+#
+#     sky ssh up                    # deploys K3s onto the hosts below
+#     sky check ssh                 # confirms the pool is enabled
+#     sky launch --infra ssh/flux-site-a tasks/task-hpc.yaml
+#
+# IMPORTANT: `sky ssh up` installs K3s (needs sudo/systemd on the nodes). Only
+# use this where your HPC admins allow it. It does NOT talk to the Flux
+# scheduler -- it schedules onto the nodes directly via K3s. If neither Slurm
+# nor a user-space K3s is available, this path is not usable; see README.
+#
+# Pool name (`flux-site-a`) becomes kubernetes context `ssh-flux-site-a` and
+# infra `ssh/flux-site-a`. It must match `ssh.allowed_node_pools` in config.
+
+flux-site-a:
+  # Defaults applied to every host in the pool (override per-host below).
+  user: myuser
+  identity_file: ~/.ssh/id_ed25519
+  hosts:
+    # Simplest form: a Host that already works via `ssh <name>` (e.g. one with
+    # a ControlMaster set up for MFA -- see slurm-config / README).
+    - node-a1
+    # Or an explicit IP with per-host credentials.
+    - ip: 10.0.0.12
+      user: myuser
+      identity_file: ~/.ssh/id_ed25519

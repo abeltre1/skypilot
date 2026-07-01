@@ -1,0 +1,47 @@
+# OpenShift (OCP) pod_config snippet.
+#
+# OCP's default `restricted-v2` SecurityContextConstraint (SCC) assigns each
+# pod an ARBITRARY non-root UID and forbids privilege escalation. SkyPilot's
+# pod template (sky/templates/kubernetes-ray.yml.j2) does not pin runAsUser and
+# decides sudo-vs-direct at runtime via `id -u`, so an arbitrary UID is fine --
+# but the pod must still declare a restricted-v2-compliant securityContext.
+#
+# Use this by nesting it under the OCP context in ~/.sky/config.yaml:
+#
+#   kubernetes:
+#     context_configs:
+#       <your-ocp-context>:
+#         pod_config:
+#           <contents below>
+#
+# It is reproduced inline in sky-config.yaml; kept here as a standalone,
+# copy-pasteable reference.
+
+spec:
+  securityContext:
+    # OCP injects the actual UID/fsGroup from the namespace's allocated range;
+    # we only assert non-root + a default seccomp profile.
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        capabilities:
+          drop:
+            - ALL
+
+# ---------------------------------------------------------------------------
+# If a workload genuinely needs root or a fixed UID (restricted-v2 will reject
+# it), an OCP admin can grant a service account a more permissive SCC instead:
+#
+#   oc create serviceaccount skypilot -n <namespace>
+#   oc adm policy add-scc-to-user anyuid -z skypilot -n <namespace>
+#
+# then point SkyPilot at it via remote_identity in context_configs:
+#
+#   context_configs:
+#     <your-ocp-context>:
+#       remote_identity: skypilot
+# ---------------------------------------------------------------------------

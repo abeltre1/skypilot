@@ -1,0 +1,56 @@
+# Example ~/.slurm/config
+#
+# SkyPilot reads this OpenSSH-config-style file to reach each Slurm login node
+# (where sbatch/squeue/sinfo run). Each `Host` block is one Slurm cluster; the
+# Host name must match `slurm.allowed_clusters` in ~/.sky/config.yaml.
+#
+# Fields SkyPilot honors: HostName, User, Port, IdentityFile, IdentitiesOnly,
+# ProxyJump, ProxyCommand  (see sky/provision/slurm/utils.py).
+#
+# Verify each entry independently before running SkyPilot:
+#     ssh -F ~/.slurm/config hpc1 sinfo
+
+# ---------------------------------------------------------------------------
+# hpc1 -- straightforward key-based login (no MFA)
+# ---------------------------------------------------------------------------
+Host hpc1
+    HostName login.hpc1.example.com
+    User myuser
+    IdentityFile ~/.ssh/id_ed25519
+    IdentitiesOnly yes
+
+# ---------------------------------------------------------------------------
+# hpc2 -- OTP + YubiKey MFA login
+# ---------------------------------------------------------------------------
+# MFA cannot be scripted. The trick: authenticate ONCE interactively to open a
+# persistent OpenSSH ControlMaster socket, then route SkyPilot's connections
+# through that already-authenticated master via ProxyCommand. SkyPilot's
+# paramiko client does not reuse control sockets directly, but it DOES honor
+# ProxyCommand -- and the `ssh -W` inside it reuses the master with no re-auth.
+#
+# 1) Add the master host to ~/.ssh/config (see ssh-config-mfa snippet in README):
+#        Host hpc2-cm
+#            HostName login.hpc2.example.com
+#            User myuser
+#            ControlMaster auto
+#            ControlPath ~/.ssh/cm/%r@%h:%p
+#            ControlPersist 12h
+# 2) Open the master once (does OTP + YubiKey touch), keep it warm for ~12h:
+#        mkdir -p ~/.ssh/cm && ssh hpc2-cm true
+# 3) SkyPilot reaches hpc2 through that master with the ProxyCommand below.
+Host hpc2
+    HostName login.hpc2.example.com
+    User myuser
+    ProxyCommand ssh -W %h:%p hpc2-cm
+
+# ---------------------------------------------------------------------------
+# hpc3 -- login via a jump/bastion host (MFA on the bastion)
+# ---------------------------------------------------------------------------
+# If MFA is enforced on a bastion rather than the login node, put the
+# ControlMaster on the bastion (bastion-cm in ~/.ssh/config, authenticate once)
+# and ProxyJump through it.
+# Host hpc3
+#     HostName login.hpc3.internal
+#     User myuser
+#     IdentityFile ~/.ssh/id_ed25519
+#     ProxyJump bastion-cm

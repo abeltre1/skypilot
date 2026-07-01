@@ -1,0 +1,96 @@
+# Example ~/.sky/config.yaml wiring several HPC (Slurm) clusters and an
+# OpenShift (OCP) cluster into SkyPilot as infra choices.
+#
+# Copy the relevant blocks into ~/.sky/config.yaml on the host running the
+# SkyPilot API server (this is the machine that talks to your clusters).
+#
+# Rename the placeholder cluster/context names to match your environment:
+#   - Slurm cluster names below must match the `Host` entries in ~/.slurm/config
+#   - The kubernetes context name must match `kubectl config get-contexts`
+#     (for OpenShift this is the context created by `oc login`).
+
+# ---------------------------------------------------------------------------
+# HPC systems (Slurm)
+# ---------------------------------------------------------------------------
+# Regions = Slurm clusters, zones = Slurm partitions. SkyPilot submits jobs
+# with sbatch/squeue over SSH to the login node defined in ~/.slurm/config.
+slurm:
+  # Only expose these clusters (or set to `all`). Each name is a Host entry
+  # in ~/.slurm/config.
+  allowed_clusters:
+    - hpc1
+    - hpc2
+
+  # Seconds to wait for a Slurm allocation before giving up / failing over.
+  provision_timeout: 600
+
+  cluster_configs:
+    hpc1:
+      # Map SkyPilot accelerator requests to the partition(s) that carry them.
+      gpu_partition_map:
+        H100: [gpu-h100]
+        A100: [gpu-a100]
+      # Partition used for CPU-only jobs.
+      cpu_partition: cpu
+      # Raw #SBATCH directives. Do NOT set job-name/output/error/nodes/
+      # cpus-per-task/mem/gres/partition here -- SkyPilot manages those.
+      sbatch_options:
+        account: my-allocation
+        qos: normal
+        time: '02:00:00'
+      # Optional: where SkyPilot stages files / scratch on the cluster.
+      workdir: /scratch/$USER/skypilot
+      tmpdir: /tmp/$USER/skypilot
+
+    hpc2:
+      gpu_partition_map:
+        H100: [gpu]
+      cpu_partition: shared
+      sbatch_options:
+        account: my-allocation
+        time: '04:00:00'
+
+# ---------------------------------------------------------------------------
+# OpenShift (OCP) -- treated as a Kubernetes cloud
+# ---------------------------------------------------------------------------
+# OCP is Kubernetes underneath, so the native `kubernetes` cloud drives it.
+# The context name is whatever `oc login` created in your kubeconfig.
+kubernetes:
+  allowed_contexts:
+    - my-openshift/api-ocp-example-com:6443/myuser
+
+  # How SkyPilot exposes ports. OCP uses Routes rather than Ingress, so
+  # prefer loadbalancer here (or create an OCP Route out-of-band). See README.
+  ports: loadbalancer
+
+  context_configs:
+    my-openshift/api-ocp-example-com:6443/myuser:
+      # OpenShift's restricted-v2 SCC requires a non-root, dropped-capability
+      # pod. The security context below satisfies it. Keep this in sync with
+      # ocp-pod-config.yaml.
+      pod_config:
+        spec:
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                capabilities:
+                  drop:
+                    - ALL
+      # Optional: seconds to wait for a pod to schedule before failover.
+      provision_timeout: 300
+
+# ---------------------------------------------------------------------------
+# Bare SSH login nodes / non-Slurm schedulers (optional)
+# ---------------------------------------------------------------------------
+# For HPC systems that are NOT Slurm (e.g. Flux) SkyPilot has no native
+# scheduler integration. Where admins permit a user-space K3s, you can turn
+# login/compute nodes into an SSH Node Pool (see ssh_node_pools.yaml and
+# `sky ssh up`). This block only restricts which pools are usable.
+ssh:
+  allowed_node_pools:
+    - flux-site-a

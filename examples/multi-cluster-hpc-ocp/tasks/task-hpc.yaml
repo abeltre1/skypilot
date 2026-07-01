@@ -1,0 +1,18 @@
+# Run a GPU task on a specific HPC (Slurm) cluster.
+#
+#   sky launch --infra slurm/hpc1 tasks/task-hpc.yaml -c hpc-probe
+#   sky logs hpc-probe
+#   sky down hpc-probe          # -> scancel on the cluster
+#
+# `slurm/hpc1` must match a Host in ~/.slurm/config and slurm.allowed_clusters.
+# The accelerator maps to a partition via slurm.cluster_configs.hpc1.gpu_partition_map.
+
+name: hpc-gpu-probe
+
+resources:
+  infra: slurm/hpc1
+  accelerators: H100:1
+
+run: |
+  echo "Running on HPC (Slurm) node: $(hostname)"
+  nvidia-smi

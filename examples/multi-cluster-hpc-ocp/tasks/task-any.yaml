@@ -1,0 +1,23 @@
+# Launch across all registered infra with failover.
+#
+#   sky launch tasks/task-any.yaml -c any-probe
+#
+# SkyPilot tries the resource options in order (ordered) and uses the first one
+# that can be provisioned -- e.g. HPC first, fall back to OCP if the Slurm
+# queue is full or the cluster is unreachable. Switch `ordered` to `any_of` to
+# let the optimizer choose purely on cost/availability.
+
+name: any-gpu-probe
+
+resources:
+  ordered:
+    - infra: slurm/hpc1
+      accelerators: H100:1
+    - infra: slurm/hpc2
+      accelerators: H100:1
+    - infra: k8s               # OpenShift fallback (CPU-only here)
+      cpus: 2
+
+run: |
+  echo "Landed on: $(hostname)"
+  (command -v nvidia-smi >/dev/null && nvidia-smi) || nproc

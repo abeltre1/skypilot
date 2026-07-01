@@ -1,0 +1,23 @@
+# Run a task on the OpenShift (OCP) cluster.
+#
+#   sky launch --infra k8s/<your-ocp-context> tasks/task-ocp.yaml -c ocp-probe
+#   sky logs ocp-probe
+#   sky down ocp-probe
+#
+# The context must appear in kubernetes.allowed_contexts and carry the
+# restricted-v2-compliant pod_config (see sky-config.yaml / ocp-pod-config.yaml).
+# Pass the full context string after `k8s/`, or omit --infra to let SkyPilot
+# pick any enabled context.
+
+name: ocp-probe
+
+resources:
+  # Replace with your OCP context, e.g.
+  #   infra: k8s/my-openshift/api-ocp-example-com:6443/myuser
+  infra: k8s
+  cpus: 2
+
+run: |
+  echo "Running on OpenShift pod: $(hostname)"
+  echo "Effective UID (OCP assigns an arbitrary non-root UID): $(id -u)"
+  nproc
