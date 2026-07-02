@@ -1,0 +1,47 @@
+# Multi-node distributed pattern for HPC (Slurm) clusters: torchrun rendezvous
+# across the nodes SkyPilot allocates in one Slurm job.
+#
+#   sky launch -y -c ddp tasks/multinode-torchrun.yaml --infra slurm/<cluster>
+#
+# SkyPilot exposes the allocation via SKYPILOT_* env vars (same interface on
+# every infra, so this file also works unchanged on Kubernetes/OCP or cloud):
+#   SKYPILOT_NUM_NODES / SKYPILOT_NODE_RANK / SKYPILOT_NODE_IPS
+#
+# Requires >= 2 nodes in the target partition. On the single-node local
+# testbed, set num_nodes: 1 to smoke-test the same script.
+
+name: ddp-allreduce
+
+num_nodes: 2
+
+resources:
+  infra: slurm
+  cpus: 2
+  # accelerators: H100:8   # GPU systems: 8 GPUs per node
+
+setup: |
+  pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+
+run: |
+  MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  echo "node rank ${SKYPILOT_NODE_RANK}/${SKYPILOT_NUM_NODES}, master=${MASTER_ADDR}"
+  torchrun \
+    --nnodes=${SKYPILOT_NUM_NODES} \
+    --nproc-per-node=1 \
+    --node-rank=${SKYPILOT_NODE_RANK} \
+    --master-addr=${MASTER_ADDR} \
+    --master-port=29500 \
+    - <<'PY'
+  import os, torch, torch.distributed as dist
+  dist.init_process_group(backend='gloo')  # nccl on GPU systems
+  rank, world = dist.get_rank(), dist.get_world_size()
+  t = torch.ones(1) * (rank + 1)
+  dist.all_reduce(t)
+  expected = world * (world + 1) // 2
+  print(f'rank {rank}/{world}: all_reduce={t.item():.0f} (expected {expected})',
+        flush=True)
+  assert int(t.item()) == expected
+  dist.destroy_process_group()
+  if rank == 0:
+      print('ALLREDUCE OK')
+  PY

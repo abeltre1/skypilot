@@ -1,0 +1,54 @@
+# Real training workload for an HPC (Slurm) cluster: PyTorch MLP on synthetic
+# data. CPU by default so it runs anywhere; uncomment accelerators for GPU
+# systems (maps to a partition via slurm.cluster_configs.<name>.gpu_partition_map).
+#
+#   sky launch -y -c train tasks/train-pytorch.yaml --infra slurm/demo-hpc
+#   sky logs train
+#   sky down -y train
+#
+# Runs end-to-end against the local Slurm testbed
+# (see local-testbed/setup-local-slurm.sh).
+
+name: train-pytorch
+
+resources:
+  infra: slurm
+  cpus: 2
+  # For GPU systems:
+  # accelerators: H100:1
+
+envs:
+  EPOCHS: '3'
+
+setup: |
+  pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+
+run: |
+  echo "Training on $(hostname) (Slurm job ${SLURM_JOB_ID:-n/a})"
+  python - <<'PY'
+  import os, time, torch, torch.nn as nn
+
+  torch.manual_seed(0)
+  device = 'cuda' if torch.cuda.is_available() else 'cpu'
+  model = nn.Sequential(nn.Linear(128, 256), nn.ReLU(),
+                        nn.Linear(256, 10)).to(device)
+  opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+  loss_fn = nn.CrossEntropyLoss()
+  x = torch.randn(4096, 128, device=device)
+  y = torch.randint(0, 10, (4096,), device=device)
+
+  for epoch in range(int(os.environ.get('EPOCHS', 3))):
+      t0 = time.time()
+      perm = torch.randperm(len(x), device=device)
+      total = 0.0
+      for i in range(0, len(x), 256):
+          idx = perm[i:i + 256]
+          opt.zero_grad()
+          loss = loss_fn(model(x[idx]), y[idx])
+          loss.backward()
+          opt.step()
+          total += loss.item()
+      print(f'epoch {epoch}: loss={total / (len(x) // 256):.4f} '
+            f'({time.time() - t0:.1f}s, device={device})', flush=True)
+  print('TRAINING DONE')
+  PY
