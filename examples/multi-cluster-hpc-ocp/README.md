@@ -166,6 +166,88 @@ sky launch                    tasks/task-any.yaml -c any-probe   # failover acro
 sky down -y hpc-probe ocp-probe any-probe
 ```
 
+## Verified end-to-end (local Slurm testbed)
+
+The Slurm path in this bundle is verified against a **real, live Slurm 23.11
+cluster** (single node, Ubuntu 24.04) built by
+[`local-testbed/setup-local-slurm.sh`](local-testbed/setup-local-slurm.sh) —
+SkyPilot connects over SSH to the login node as an unprivileged user and drives
+`sbatch`/`squeue`, exactly as it would on a production HPC system.
+
+```console
+$ sky check slurm
+  Slurm: enabled [compute]
+    Allowed clusters:
+    └── demo-hpc: enabled.
+
+$ sky launch -y -c hpc-demo --infra slurm/demo-hpc --cpus 2 -- \
+    'echo "Hello from SkyPilot on Slurm"; echo "node: $(hostname), user: $(id -un)"; echo "slurm job: $SLURM_JOB_ID"'
+Considered resources (1 node):
+----------------------------------------------------------------------------
+ INFRA              INSTANCE   vCPUs   Mem(GB)   GPUS   COST ($)   CHOSEN
+----------------------------------------------------------------------------
+ Slurm (demo-hpc)   -          2       2         -      0.00        ✔
+----------------------------------------------------------------------------
+⚙︎ Launching on Slurm demo-hpc (cpu).
+✓ Cluster launched: hpc-demo.
+⚙︎ Job submitted, ID: 1
+(sky-cmd, pid=5718) Hello from SkyPilot on Slurm
+(sky-cmd, pid=5718) node: vm, user: hpcuser
+(sky-cmd, pid=5718) slurm job: 10
+✓ Job finished (status: SUCCEEDED).
+```
+
+On the Slurm side this shows up as a normal user job:
+
+```console
+$ squeue
+   JOBID PARTITION     NAME     USER ST   TIME  NODES NODELIST(REASON)
+      10       cpu hpc-demo  hpcuser  R   0:27      1 vm
+```
+
+To reproduce anywhere (VM/container, root):
+
+```bash
+sudo bash local-testbed/setup-local-slurm.sh
+sky api start && sky check slurm
+sky launch -y -c hpc-demo --infra slurm/demo-hpc --cpus 2 -- hostname
+```
+
+> Tip surfaced by the live run: if a partition has no `MaxTime`/`DefaultTime`,
+> SkyPilot warns that jobs submitted without `--time` can hang behind
+> maintenance reservations — set `slurm.sbatch_options.time` (or
+> `cluster_configs.<name>.sbatch_options.time`) as done in `sky-config.yaml`.
+
+## Restricted networks (egress proxies, blocked domains)
+
+Lessons from bringing this up behind a TLS-intercepting egress proxy — the
+same class of problems you will hit on locked-down HPC networks:
+
+1. **Proxy env must reach the SSH user and Slurm jobs.** The node bootstrap
+   (conda, pip) runs as your HPC user inside the allocation. Put
+   `http(s)_proxy`/`no_proxy` in `/etc/environment` (PAM applies it to SSH
+   sessions) or the user's `~/.bashrc` — root's env does not propagate.
+2. **TLS-intercepting proxies need the CA everywhere.** `curl` honors the
+   system trust store, but `uv` (bundled rustls roots) and `pip` (certifi) do
+   not: exports needed are `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `PIP_CERT`
+   (all pointing at the system bundle) and `UV_NATIVE_TLS=true`. The failure
+   signatures are `invalid peer certificate: UnknownIssuer` (uv) and
+   `self-signed certificate in certificate chain` (pip).
+   Two placement gotchas found the hard way:
+   - Exports must go at the **top** of `~/.bashrc` — stock Ubuntu `.bashrc`
+     returns early for non-interactive shells, so appended lines never reach
+     batch jobs.
+   - Task `setup:`/`run:` phases execute under the cluster runtime, not a
+     login shell — pass the vars through the task instead:
+     `sky launch ... --env PIP_CERT=/etc/ssl/certs/ca-certificates.crt ...`
+3. **`astral.sh` blocked:** SkyPilot bootstraps `uv` from astral.sh. If only
+   PyPI is reachable, pre-seed the `uv` binary at
+   `~/.sky_clusters/<cluster>-<userhash>/.local/bin/uv` on the login node —
+   the bootstrap skips the download when it is already present
+   (`setup-local-slurm.sh` automates this).
+4. **`download.pytorch.org` blocked:** `tasks/train-pytorch.yaml` falls back
+   to installing torch from PyPI when the PyTorch index is unreachable.
+
 ## Notes / limitations (flagged, not hidden)
 
 - Native **Flux** scheduling is out of scope (config-only prototype).

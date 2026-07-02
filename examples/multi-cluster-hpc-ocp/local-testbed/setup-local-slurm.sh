@@ -98,19 +98,29 @@ if [[ -n "${HTTPS_PROXY:-}" ]]; then
     for ca in /root/.ccr/agent-proxy-ca.crt; do
         [[ -f $ca ]] && cp "$ca" /usr/local/share/ca-certificates/ && update-ca-certificates >/dev/null
     done
+    # TLS-intercepting proxies re-sign certificates: curl trusts the system
+    # store, but uv (rustls, bundled roots) and pip (certifi) do NOT -- they
+    # fail with "invalid peer certificate: UnknownIssuer" unless pointed at
+    # the system bundle explicitly.
+    CA=/etc/ssl/certs/ca-certificates.crt
     if ! grep -q HTTPS_PROXY /etc/environment 2>/dev/null; then
         {
             echo "https_proxy=${HTTPS_PROXY}"; echo "http_proxy=${HTTPS_PROXY}"
             echo "HTTPS_PROXY=${HTTPS_PROXY}"; echo "HTTP_PROXY=${HTTPS_PROXY}"
             echo "no_proxy=${no_proxy:-}"; echo "NO_PROXY=${NO_PROXY:-}"
+            echo "SSL_CERT_FILE=${CA}"; echo "REQUESTS_CA_BUNDLE=${CA}"
+            echo "PIP_CERT=${CA}"; echo "UV_NATIVE_TLS=true"
         } >> /etc/environment
     fi
+    # Insert at the TOP of .bashrc: Ubuntu's stock .bashrc returns early for
+    # non-interactive shells, so appended exports never reach batch jobs.
     if ! grep -q HTTPS_PROXY /home/hpcuser/.bashrc 2>/dev/null; then
-        {
-            echo "export https_proxy=${HTTPS_PROXY} http_proxy=${HTTPS_PROXY}"
-            echo "export HTTPS_PROXY=${HTTPS_PROXY} HTTP_PROXY=${HTTPS_PROXY}"
-            echo "export no_proxy='${no_proxy:-}' NO_PROXY='${NO_PROXY:-}'"
-        } >> /home/hpcuser/.bashrc
+        sed -i \
+            -e "1i export https_proxy=${HTTPS_PROXY} http_proxy=${HTTPS_PROXY}" \
+            -e "1i export HTTPS_PROXY=${HTTPS_PROXY} HTTP_PROXY=${HTTPS_PROXY}" \
+            -e "1i export no_proxy='${no_proxy:-}' NO_PROXY='${NO_PROXY:-}'" \
+            -e "1i export SSL_CERT_FILE=${CA} REQUESTS_CA_BUNDLE=${CA} PIP_CERT=${CA} UV_NATIVE_TLS=true CURL_CA_BUNDLE=${CA}" \
+            /home/hpcuser/.bashrc
     fi
 fi
 

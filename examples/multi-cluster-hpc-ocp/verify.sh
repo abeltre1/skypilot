@@ -71,7 +71,7 @@ fi
 
 echo
 echo "== Live checks =="
-for t in task-hpc task-ocp task-any; do
+for t in task-hpc train-pytorch task-ocp task-any; do
   c="probe-${t}"
   echo "-- launching ${t} as ${c} --"
   if sky launch -y -c "$c" "${HERE}/tasks/${t}.yaml"; then
