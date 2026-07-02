@@ -205,6 +205,36 @@ $ squeue
       10       cpu hpc-demo  hpcuser  R   0:27      1 vm
 ```
 
+Real workloads verified on the same live cluster:
+
+```console
+$ sky launch -y -c hpc-demo tasks/train-pytorch.yaml
+⚙︎ Job submitted, ID: 3
+(train-pytorch, pid=18823) Training on vm (Slurm job 10)
+(train-pytorch, pid=18823) epoch 0: loss=2.3231 (0.0s, device=cpu)
+(train-pytorch, pid=18823) epoch 1: loss=2.2530 (0.0s, device=cpu)
+(train-pytorch, pid=18823) epoch 2: loss=2.2060 (0.0s, device=cpu)
+(train-pytorch, pid=18823) TRAINING DONE
+✓ Job finished (status: SUCCEEDED).
+
+$ sky exec hpc-demo -- 'torchrun --standalone --nnodes=1 --nproc-per-node=2 /tmp/ar.py'
+(sky-cmd) rank 0/2: all_reduce=3 (expected 3)
+(sky-cmd) rank 1/2: all_reduce=3 (expected 3)
+(sky-cmd) ALLREDUCE-OK
+✓ Job finished (status: SUCCEEDED).
+
+$ sky queue hpc-demo
+ID  NAME           ...  RESOURCES   STATUS
+5   sky-cmd        ...  1x[CPU:1+]  SUCCEEDED
+3   train-pytorch  ...  1x[CPU:2]   SUCCEEDED
+1   sky-cmd        ...  1x[CPU:2]   SUCCEEDED
+
+$ sky down -y hpc-demo && squeue
+Terminating cluster hpc-demo...done.
+   JOBID PARTITION  NAME  USER  ST  TIME  NODES NODELIST(REASON)
+                                                  # <- allocation scancel'ed
+```
+
 To reproduce anywhere (VM/container, root):
 
 ```bash
